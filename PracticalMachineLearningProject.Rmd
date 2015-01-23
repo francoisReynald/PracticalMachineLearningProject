@@ -1,0 +1,118 @@
+---
+title: "Practical Machine Learning Project"
+author: "François Reynald"
+date: "10 janvier 2015"
+output: html_document
+---
+
+# Executive summary
+
+In this project we analyze the data measured by devices during barbell lifts to create a model able to predict the manner in which the exercice was done. The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. We show that we can create a model from the data that yields very accurate predictions.
+
+# Download training data
+
+```{r downloadTrainingData}
+if(!file.exists("pml-training.csv")) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(fileUrl, destfile="pml-training.csv",method="curl")
+}
+if (!exists("rawtraining")) 
+  rawtraining <- read.csv("pml-training.csv")
+```
+
+# Download test data
+
+```{r downloadTestData}
+if(!file.exists("pml-test.csv")) {
+  fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(fileUrl, destfile="pml-testing.csv",method="curl")
+}
+if (!exists("rowtesting")) 
+  rawtesting <- read.csv("pml-testing.csv")
+```
+
+
+# Explore training data
+
+First let's look at the missing values in our dataset.
+
+```{r exploreTrainingData}
+hist(colSums(is.na(rawtraining)))
+```
+
+It seems that there are two distinct sets of variables: one with only 406 observations and one with all the observations.
+Let's get rid of the first set of variables by filtering those that are not present for 97% of the observations.
+
+```{r filterData}
+filter <- colSums(is.na(rawtraining)) < 0.97 * nrow(rawtraining)
+training <- rawtraining[,filter]
+testing <- rawtesting[,filter]
+```
+
+Next we remove another set of columns with irrelevant information for our purpose like timestamps for instance.
+
+```{r removeTimestamps}
+toBeRemoved =  c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+training <- training[,!(names(training) %in% toBeRemoved)]
+testing <- testing[,!(names(testing) %in% toBeRemoved)]
+```
+
+Lastly we remove the near zero covariates.
+
+```{r removeNearZeroValues}
+library(caret)
+nsv <- nearZeroVar(training, saveMetrics = T)
+training <- training[, !nsv$nzv]
+testing <- testing[, !nsv$nzv]
+```
+
+
+# Partition the training set to create a cross validation set
+
+Since the training data set is very large, we split it into a training and a cross validation set.
+
+```{r createPartition}
+inTrain = createDataPartition(training$classe, p = 0.7,list=FALSE)
+training = training[ inTrain,]
+validation = training[-inTrain,]
+```
+
+# Fit model
+
+In the absence of background knowlegde about the subject matter, we select the Random Forest algorithm to train our model. We set the number of trees to fifty on purpose in order to limit the computing time.
+
+```{r modelFit,cache=TRUE}
+set.seed(123)
+modFit <- train(classe ~ ., data=training,method="rf",ntree=50, proximity=TRUE)
+```
+
+In random forests, there is no need for cross-validation or a separate test set to get an unbiased estimate of the test set error. It is estimated internally, during the run, via the Out Of Bag (oob) error estimate. Still since we were able to split the large training data, we can verify our model on the validation set.
+
+```{r validation}
+verification <- predict(modFit,validation)
+confusionMatrix(verification,validation$classe)
+```
+
+We get very good results from our model.There is no need to increase either the size of the training set or the number of trees.
+We then proceed to apply our model to the test set.
+
+
+```{r prediction}
+prediction <- predict(modFit,testing)
+```
+
+Lastly we create the files for the automated grading system.
+
+```{r createSubmissionFiles}
+
+pml_write_files = function(x){
+     n = length(x)
+     for(i in 1:n){
+         filename = paste0("problem_id_",i,".txt")
+         write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+     }
+}
+
+pml_write_files(prediction)
+```
+
